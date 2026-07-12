@@ -115,32 +115,45 @@ def extract_vendor(text: str) -> Optional[str]:
     return None
 
 
+CURRENCY_PREFIX = r"(?:rs\.?|₹|\$|inr|usd|eur|gbp|£|€)"
+PERCENT_EXPR = r"\(?\s*\d+(?:\.\d+)?\s*%\s*\)?"
+
+
+def extract_line_value(text: str, keyword_pattern: str) -> Optional[str]:
+    """
+    Find a line containing keyword_pattern, then look ONLY at the text
+    after the keyword on that line for a monetary value. Strips any
+    percentage expression first (e.g. "(18%)", "18%", "@18%") so a rate
+    like "21%" is never mistaken for the actual amount.
+    """
+    for line in text.split("\n"):
+        match = re.search(keyword_pattern, line, re.IGNORECASE)
+        if not match:
+            continue
+        rest = line[match.end():]
+        rest = re.sub(PERCENT_EXPR, " ", rest)
+        num_match = re.search(rf"{CURRENCY_PREFIX}?\s*([\d,]+\.?\d*)", rest, re.IGNORECASE)
+        if num_match:
+            return num_match.group(1)
+    return None
+
+
 def extract_amount(text: str) -> Optional[float]:
-    patterns = [
-        r"sub[\s\-]?total\s*[.:\-]*\s*(?:rs\.?|₹|\$|inr|usd|eur|gbp|£|€)?\s*([\d,]+\.?\d*)",
-    ]
-    raw = find_first(patterns, text)
+    raw = extract_line_value(text, r"sub[\s\-]?total")
     if raw:
         return parse_number(raw)
 
     # Fallback: total - tax, if both are found explicitly elsewhere
-    total = find_first(
-        [r"(?:grand\s*)?total\s*[.:\-]*\s*(?:rs\.?|₹|\$|inr|usd|eur|gbp|£|€)?\s*([\d,]+\.?\d*)"],
-        text,
-    )
+    total_raw = extract_line_value(text, r"(?:grand\s*)?total")
     tax = extract_tax(text)
-    total_val = parse_number(total)
+    total_val = parse_number(total_raw)
     if total_val is not None and tax is not None:
         return round(total_val - tax, 2)
     return None
 
 
 def extract_tax(text: str) -> Optional[float]:
-    patterns = [
-        r"(?:gst|vat|tax)\s*\([\d.]+%\)\s*[.:\-]*\s*(?:rs\.?|₹|\$|inr|usd|eur|gbp|£|€)?\s*([\d,]+\.?\d*)",
-        r"(?:gst|vat|tax)\s*[.:\-]*\s*(?:rs\.?|₹|\$|inr|usd|eur|gbp|£|€)?\s*([\d,]+\.?\d*)",
-    ]
-    raw = find_first(patterns, text)
+    raw = extract_line_value(text, r"gst|vat|tax")
     return parse_number(raw) if raw else None
 
 
