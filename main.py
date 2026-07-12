@@ -57,16 +57,38 @@ def find_first(patterns, text: str) -> Optional[str]:
     return None
 
 
+INVOICE_NO_PATTERNS = [
+    # "Invoice No:", "Invoice Number:", "Invoice #:", "Invoice ID:"
+    r"invoice\s*(?:no\.?|number|#|id)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-\/_.]*)",
+    # "Invoice Ref:", "Invoice Reference No:"
+    r"invoice\s*ref(?:erence)?\.?\s*(?:no\.?|number|#)?\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-\/_.]*)",
+    # "Bill No:", "Receipt No:", "Voucher No:", "Doc No:", "Order No:", "PO No:"
+    r"(?:bill|receipt|voucher|doc(?:ument)?|order|po|tracking)\s*(?:no\.?|number|#|id)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-\/_.]*)",
+    # "Ref No:", "Reference Number:" (colon/dash required to avoid matching the bare word "reference")
+    r"\bref(?:erence)?\.?\s*(?:no\.?|number|#)?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\-\/_.]*)",
+    # bare "No:" as a last-resort label (still requires a colon/dash so it doesn't match prose)
+    r"\bno\.?\s*[:\-]\s*([A-Za-z0-9][A-Za-z0-9\-\/_.]*)",
+]
+
+
 def extract_invoice_no(text: str) -> Optional[str]:
-    patterns = [
-        r"invoice\s*(?:no\.?|number|#)\s*[:\-]?\s*([A-Za-z0-9][A-Za-z0-9\-\/_.]*)",
-        r"\bINV[-\/]?[A-Za-z0-9\-\/]+\b",
-    ]
-    val = find_first(patterns[:1], text)
-    if val:
-        return val
-    match = re.search(patterns[1], text, re.IGNORECASE)
-    return match.group(0).strip() if match else None
+    for pattern in INVOICE_NO_PATTERNS:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            val = match.group(1).strip().strip(".,;:")
+            # Safety rule: a real invoice number always contains a digit.
+            # This is what stops a bare heading word like "Invoice" or
+            # "Reference" from ever being accepted as a false match.
+            if val and any(ch.isdigit() for ch in val):
+                return val
+
+    # Last resort: scan the first few lines for something shaped like an
+    # ID code (letters/digits with a dash), still requiring a digit.
+    for line in text.split("\n")[:6]:
+        match = re.search(r"\b([A-Za-z]{1,6}[-\/]?\d[A-Za-z0-9\-\/]*)\b", line)
+        if match and any(ch.isdigit() for ch in match.group(1)):
+            return match.group(1)
+
+    return None
 
 
 def extract_date(text: str) -> Optional[str]:
